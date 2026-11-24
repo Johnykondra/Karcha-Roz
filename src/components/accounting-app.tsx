@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useAccountingState } from "@/components/accounting-state";
 import type {
@@ -23,11 +23,12 @@ const sections: { label: string; href: string; icon: string }[] = [
 const groups: AccountGroup[] = ["Assets", "Liabilities", "Equity", "Revenue", "Expenses"];
 
 function formatCurrency(value: number) {
+  const displayValue = Math.abs(value) < 0.005 ? 0 : value;
   return new Intl.NumberFormat("en-AE", {
     style: "currency",
     currency: "AED",
     maximumFractionDigits: 2,
-  }).format(value);
+  }).format(displayValue);
 }
 
 function formatDate(value: string) {
@@ -535,6 +536,7 @@ function ReportsPage({
 }) {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [ledgerAccountId, setLedgerAccountId] = useState("all");
   const availableDates = entries.map((entry) => entry.date).sort();
   const defaultFromDate = availableDates[0] ?? "";
   const defaultToDate = availableDates[availableDates.length - 1] ?? "";
@@ -693,9 +695,7 @@ function ReportsPage({
   const debtToEquity =
     totalEquity > 0 ? totalLiabilities / totalEquity : null;
 
-  const trialBalance = closingBalances.filter(
-    (account) => account.debit > 0 || account.credit > 0,
-  );
+  const trialBalance = closingBalances;
   const trialDebits = trialBalance.reduce(
     (total, account) => total + account.debit,
     0,
@@ -711,6 +711,82 @@ function ReportsPage({
   const asOfLabel = reportToDate
     ? formatDate(reportToDate)
     : "latest posted date";
+  const chartAccounts = [...closingBalances].sort((a, b) =>
+    a.code.localeCompare(b.code, undefined, { numeric: true }),
+  );
+  const journalRows = useMemo(
+    () =>
+      periodEntries
+        .flatMap((entry) =>
+          entry.lines.map((line) => ({ entry, line })),
+        )
+        .sort(
+          (a, b) =>
+            a.entry.date.localeCompare(b.entry.date) ||
+            a.entry.entryNumber.localeCompare(b.entry.entryNumber, undefined, {
+              numeric: true,
+            }) ||
+            a.line.lineNumber - b.line.lineNumber,
+        ),
+    [periodEntries],
+  );
+  const ledgerReports = useMemo(() => {
+    const openingEntries = reportFromDate
+      ? entries.filter((entry) => entry.date < reportFromDate)
+      : [];
+    const selectedAccounts = accounts
+      .filter(
+        (account) =>
+          ledgerAccountId === "all" || account.id === ledgerAccountId,
+      )
+      .sort((a, b) =>
+        a.code.localeCompare(b.code, undefined, { numeric: true }),
+      );
+
+    return selectedAccounts.map((account) => {
+      const normalSign = account.normalBalance === "debit" ? 1 : -1;
+      const openingBalance =
+        openingEntries.reduce(
+          (total, entry) =>
+            total +
+            entry.lines
+              .filter((line) => line.accountId === account.id)
+              .reduce(
+                (movement, line) => movement + line.debit - line.credit,
+                0,
+              ),
+          0,
+        ) * normalSign;
+      let runningBalance = openingBalance;
+      const rows = periodEntries
+        .flatMap((entry) =>
+          entry.lines
+            .filter((line) => line.accountId === account.id)
+            .map((line) => ({ entry, line })),
+        )
+        .sort(
+          (a, b) =>
+            a.entry.date.localeCompare(b.entry.date) ||
+            a.entry.entryNumber.localeCompare(b.entry.entryNumber, undefined, {
+              numeric: true,
+            }) ||
+            a.line.lineNumber - b.line.lineNumber,
+        )
+        .map(({ entry, line }) => {
+          runningBalance += (line.debit - line.credit) * normalSign;
+          return { entry, line, runningBalance };
+        });
+
+      return {
+        account,
+        openingBalance,
+        rows,
+        closingBalance: runningBalance,
+        totalDebits: rows.reduce((total, row) => total + row.line.debit, 0),
+        totalCredits: rows.reduce((total, row) => total + row.line.credit, 0),
+      };
+    });
+  }, [accounts, entries, ledgerAccountId, periodEntries, reportFromDate]);
 
   return (
     <div className="reports-page">
@@ -986,6 +1062,7 @@ function ReportsPage({
                 <tr>
                   <th>CODE</th>
                   <th>ACCOUNT</th>
+                  <th>TYPE</th>
                   <th className="align-right">DEBIT (AED)</th>
                   <th className="align-right">CREDIT (AED)</th>
                 </tr>
@@ -995,6 +1072,7 @@ function ReportsPage({
                   <tr key={account.id}>
                     <td><span className="entry-id">{account.code}</span></td>
                     <td><span className="table-primary">{account.name}</span></td>
+                    <td>{account.group}</td>
                     <td className="align-right">
                       {account.debit ? formatCurrency(account.debit) : "—"}
                     </td>
@@ -1005,15 +1083,15 @@ function ReportsPage({
                 ))}
                 {trialBalance.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="empty-row">
-                      No posted balances as of this date.
+                    <td colSpan={5} className="empty-row">
+                      No accounts found.
                     </td>
                   </tr>
                 )}
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={2}><strong>Total</strong></td>
+                  <td colSpan={3}><strong>Total</strong></td>
                   <td className="align-right"><strong>{formatCurrency(trialDebits)}</strong></td>
                   <td className="align-right"><strong>{formatCurrency(trialCredits)}</strong></td>
                 </tr>
@@ -1022,13 +1100,189 @@ function ReportsPage({
           </div>
         </section>
       </div>
+
+      <section className="panel report-panel report-detail-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Chart of Accounts</h2>
+            <p>All accounts with closing balances as of {asOfLabel}</p>
+          </div>
+          <span className="count-pill">{chartAccounts.length} accounts · AED</span>
+        </div>
+        <div className="table-scroll">
+          <table className="data-table report-trial-table">
+            <thead>
+              <tr>
+                <th>CODE</th>
+                <th>ACCOUNT NAME</th>
+                <th>TYPE</th>
+                <th>NORMAL BALANCE</th>
+                <th>STATUS</th>
+                <th className="align-right">DEBIT (AED)</th>
+                <th className="align-right">CREDIT (AED)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chartAccounts.map((account) => (
+                <tr key={account.id}>
+                  <td><span className="entry-id">{account.code}</span></td>
+                  <td><span className="table-primary">{account.name}</span></td>
+                  <td>{account.group}</td>
+                  <td>{account.normalBalance === "debit" ? "Debit" : "Credit"}</td>
+                  <td>{account.isActive ? "Active" : "Inactive"}</td>
+                  <td className="align-right">
+                    {account.debit ? formatCurrency(account.debit) : "—"}
+                  </td>
+                  <td className="align-right">
+                    {account.credit ? formatCurrency(account.credit) : "—"}
+                  </td>
+                </tr>
+              ))}
+              {chartAccounts.length === 0 && (
+                <tr><td colSpan={7} className="empty-row">No accounts found.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel report-panel report-detail-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Journal Report</h2>
+            <p>Posted journal lines for {periodLabel}</p>
+          </div>
+          <span className="count-pill">{journalRows.length} lines</span>
+        </div>
+        <div className="table-scroll">
+          <table className="data-table report-trial-table">
+            <thead>
+              <tr>
+                <th>DATE</th>
+                <th>ENTRY</th>
+                <th>DESCRIPTION</th>
+                <th>CODE</th>
+                <th>ACCOUNT</th>
+                <th className="align-right">DEBIT (AED)</th>
+                <th className="align-right">CREDIT (AED)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {journalRows.map(({ entry, line }) => (
+                <tr key={line.id}>
+                  <td>{formatDate(entry.date)}</td>
+                  <td><span className="entry-id">{entry.entryNumber}</span></td>
+                  <td>{entry.description}</td>
+                  <td><span className="entry-id">{line.accountCode}</span></td>
+                  <td><span className="table-primary">{line.accountName}</span></td>
+                  <td className="align-right">
+                    {line.debit ? formatCurrency(line.debit) : "—"}
+                  </td>
+                  <td className="align-right">
+                    {line.credit ? formatCurrency(line.credit) : "—"}
+                  </td>
+                </tr>
+              ))}
+              {journalRows.length === 0 && (
+                <tr><td colSpan={7} className="empty-row">No journal lines in this period.</td></tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={5}><strong>Period totals</strong></td>
+                <td className="align-right">
+                  <strong>{formatCurrency(journalRows.reduce((total, row) => total + row.line.debit, 0))}</strong>
+                </td>
+                <td className="align-right">
+                  <strong>{formatCurrency(journalRows.reduce((total, row) => total + row.line.credit, 0))}</strong>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel report-panel report-detail-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>General Ledger</h2>
+            <p>Account activity and running balances for {periodLabel}</p>
+          </div>
+          <label className="ledger-account-filter">
+            <span>Account</span>
+            <select
+              aria-label="Filter general ledger by account"
+              value={ledgerAccountId}
+              onChange={(event) => setLedgerAccountId(event.target.value)}
+            >
+              <option value="all">All accounts</option>
+              {chartAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.code} · {account.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="table-scroll">
+          <table className="data-table report-trial-table ledger-report-table">
+            <thead>
+              <tr>
+                <th>DATE</th>
+                <th>ENTRY</th>
+                <th>DESCRIPTION</th>
+                <th className="align-right">DEBIT (AED)</th>
+                <th className="align-right">CREDIT (AED)</th>
+                <th className="align-right">RUNNING BALANCE (AED)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledgerReports.map((ledger) => (
+                <Fragment key={ledger.account.id}>
+                  <tr className="ledger-account-heading">
+                    <td colSpan={3}>
+                      <strong>{ledger.account.code} · {ledger.account.name}</strong>
+                    </td>
+                    <td colSpan={3} className="align-right">
+                      Opening balance: {formatCurrency(ledger.openingBalance)}
+                    </td>
+                  </tr>
+                  {ledger.rows.map(({ entry, line, runningBalance }) => (
+                    <tr key={line.id}>
+                      <td>{formatDate(entry.date)}</td>
+                      <td><span className="entry-id">{entry.entryNumber}</span></td>
+                      <td>{entry.description}</td>
+                      <td className="align-right">{line.debit ? formatCurrency(line.debit) : "—"}</td>
+                      <td className="align-right">{line.credit ? formatCurrency(line.credit) : "—"}</td>
+                      <td className="align-right">{formatCurrency(runningBalance)}</td>
+                    </tr>
+                  ))}
+                  {ledger.rows.length === 0 && (
+                    <tr><td colSpan={6} className="empty-row">No activity in this period.</td></tr>
+                  )}
+                  <tr className="ledger-closing-row">
+                    <td colSpan={3}><strong>Closing balance</strong></td>
+                    <td className="align-right"><strong>{formatCurrency(ledger.totalDebits)}</strong></td>
+                    <td className="align-right"><strong>{formatCurrency(ledger.totalCredits)}</strong></td>
+                    <td className="align-right"><strong>{formatCurrency(ledger.closingBalance)}</strong></td>
+                  </tr>
+                </Fragment>
+              ))}
+              {ledgerReports.length === 0 && (
+                <tr><td colSpan={6} className="empty-row">No accounts found.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <div className="note-card report-classification-note">
         <span className="note-mark">i</span>
         <p>
-          <strong>Report basis:</strong> Income Statement and Cash Flow use the
-          selected period; Balance Sheet and Trial Balance are as of the end
-          date. COGS, cash, and non-current accounts are identified by account
-          names because the chart currently uses broad account groups.
+          <strong>Report basis:</strong> Income Statement, Cash Flow, Journal,
+          and General Ledger use the selected period. Balance Sheet, Chart of
+          Accounts balances, and Trial Balance are as of the end date. Ledger
+          running balances follow each account&apos;s normal balance.
         </p>
       </div>
     </div>
