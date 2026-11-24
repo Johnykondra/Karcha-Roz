@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="280" viewBox="0 0 360 280" fill="none">
+  <g stroke="#23896a" stroke-opacity=".09">
+    <circle cx="72" cy="70" r="31" stroke-width="1.5"/>
+    <circle cx="72" cy="70" r="25" stroke-width=".8"/>
+    <circle cx="270" cy="213" r="25" stroke-width="1.2"/>
+    <circle cx="270" cy="213" r="19" stroke-width=".7"/>
+  </g>
+  <g fill="#18324a" fill-opacity=".075" font-family="Arial, sans-serif" font-weight="700" text-anchor="middle">
+    <text x="72" y="76" font-size="15" letter-spacing="1.2">AED</text>
+    <text x="270" y="218" font-size="12" letter-spacing=".9">AED</text>
+  </g>
+  <g stroke="#23896a" stroke-opacity=".065" stroke-width="1">
+    <path d="M151 38v10m-5-5h10M191 185v10m-5-5h10"/>
+  </g>
+</svg>
