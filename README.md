@@ -21,6 +21,14 @@ key to read the chart and journal data and post balanced entries. Use only
 non-sensitive demo data. Add Supabase Auth and user-scoped row-level security
 before storing real financial records.
 
+## Deploy on Vercel
+
+Connect the GitHub repository to a Vercel project and set
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for Production,
+Preview, and Development. Pushes to the connected production branch trigger a
+deployment. These `NEXT_PUBLIC_` values are included in browser code, so use
+only the public Supabase key and non-sensitive demo data.
+
 ## Run locally
 
 ```bash
